@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ethereum SSF LMD GHOST Prototype</title>
+<style>
+body { font-family: Arial, sans-serif; margin:0; background: linear-gradient(180deg, #1e1e2f, #2c2c3f); color:#fff; }
+h1 { text-align:center; margin-top:20px; }
+#controls { margin:10px auto; text-align:center; }
+button { padding:6px 12px; margin-right:10px; border:none; border-radius:4px; background:#4CAF50; color:#fff; cursor:pointer; transition:0.2s; }
+button:hover { background:#45a049; }
+span { margin-right:15px; font-weight:bold; }
+canvas { border:1px solid #555; display:block; margin:20px auto; background:rgba(0,0,0,0.8); }
+#tooltip { position:absolute; background:rgba(0,0,0,0.9); color:#fff; padding:6px 10px; display:none; font-size:13px; border-radius:4px; pointer-events:none; z-index:10; }
+#validators { text-align:center; margin-top:10px; }
+.validator { display:inline-block; margin:5px; padding:4px 8px; border-radius:4px; background:#555; cursor:pointer; transition:0.2s; }
+.active { background:#4CAF50; }
+.faulty { background:#f44336; }
+</style>
+</head>
+<body>
+<h1>🟣Ξ Ethereum SSF LMD GHOST Prototype 🚀</h1>
+
+<div id="controls">
+    <button onclick="simulateSlot()">Simulate Slot</button>
+    <span>Slot: <span id="slot">0</span></span>
+    <span>Finalized: <span id="finalized">-1</span></span>
+</div>
+
+<div id="validators"></div>
+
+<div style="overflow-x:auto;">
+    <canvas id="treeCanvas" width="1600" height="600"></canvas>
+</div>
+
+<div id="tooltip"></div>
+<script src="app.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
