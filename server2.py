@@ -12,7 +12,6 @@
 #
 # Author: Architecto0r
 
-
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import random
@@ -99,7 +98,6 @@ def make_block_id(slot, idx):
     return f"{slot}:{idx}"
 
 def add_block(slot, parent_id, proposer):
-    # add a new block at slot under parent_id. support multiple per slot (forks)
     idx = len(blocks_in_slot.get(slot, []))
     bid = make_block_id(slot, idx)
     block = {
@@ -141,7 +139,6 @@ def subtree_members(root_id):
         if x in out:
             continue
         out.add(x)
-        # find children
         for b in chain.values():
             if b["parent"] == x:
                 stack.append(b["id"])
@@ -151,26 +148,14 @@ def subtree_members(root_id):
 # LMD-GHOST logic (demo)
 # ----------------------
 def lmd_ghost_head():
-    """
-    Simplified LMD GHOST:
-      - Start from genesis
-      - At each level choose the child whose subtree has the largest weight,
-        where weight = number of validators whose latest message lies inside that subtree.
-    Notes:
-      - We use current validator.latest_message as the "latest message" for each validator.
-      - This is a demonstrational approximation for clarity.
-    """
-    # find immediate children of genesis
     root = "genesis"
     if not any(b for b in chain.values() if b["parent"] == root):
         return root
     cur = root
     while True:
-        # collect direct children
         children = [b["id"] for b in chain.values() if b["parent"] == cur]
         if not children:
             return cur
-        # compute weight of subtree for each child
         best_child = None
         best_weight = -1
         for child in children:
@@ -183,9 +168,7 @@ def lmd_ghost_head():
             if weight > best_weight:
                 best_weight = weight
                 best_child = child
-            # tie-breaker: prefer higher slot / lexicographic id
             elif weight == best_weight and best_child is not None:
-                # choose child with greater max slot in subtree
                 max_slot_curr = max([chain[x]["slot"] for x in subtree])
                 max_slot_best = max([chain[x]["slot"] for x in subtree_members(best_child)])
                 if max_slot_curr > max_slot_best:
@@ -198,29 +181,17 @@ def lmd_ghost_head():
 # Vote processing
 # ----------------------
 def schedule_votes_for_block(block_id, origin_slot):
-    """
-    For each non-faulty validator, schedule their vote toward some block.
-    We simulate network delay by delivering the vote after `d` slots (0..MAX_DELAY_SLOTS).
-    The target block their vote points to is determined by their view at time of vote creation:
-      - With probability (1 - delay_effect) they vote for the new block,
-      - Else they vote for the head they see (simulate delayed view).
-    To keep it simple and deterministic-ish: votes normally target block_id.
-    """
     for v in validators:
         if v["faulty"] or v.get("slashed"):
             continue
         d = random.randint(0, MAX_DELAY_SLOTS)
         deliver_slot = origin_slot + d
-        # Most validators will vote for the proposed block; some (delayed) may vote previous head
-        # probability to miss new block depends on delay d
         if d == 0:
             target = block_id
         else:
-            # with some chance vote for parent/head
             if random.random() < 0.5:
                 target = block_id
             else:
-                # vote for current head according to their (delayed) view -> approximate with lmd_ghost_head()
                 target = lmd_ghost_head()
         vote_events.append({
             "deliver_slot": deliver_slot,
@@ -230,12 +201,6 @@ def schedule_votes_for_block(block_id, origin_slot):
         })
 
 def apply_due_votes():
-    """
-    Apply vote_events whose deliver_slot <= current_slot.
-    Applying a vote:
-      - Record validator.latest_message = {slot: current_slot, block_id: voted_block}
-      - Add validator id to block.votes_received (if block exists)
-    """
     global vote_events
     to_apply = [e for e in vote_events if e["deliver_slot"] <= current_slot]
     vote_events = [e for e in vote_events if e["deliver_slot"] > current_slot]
@@ -243,18 +208,12 @@ def apply_due_votes():
     for e in to_apply:
         vid = e["validator"]
         bid = e["block_id"]
-        # if block doesn't exist (e.g., head pointer), ignore or attach to nearest ancestor
         if bid not in chain:
-            # try to fallback to latest block in that slot
-            # fallback: choose highest-slot block available
             if chain:
-                # choose block with max slot
                 bid = max(chain.keys(), key=lambda k: (chain[k]["slot"], k))
             else:
                 bid = "genesis"
-        # update validator's latest message
         validators[vid]["latest_message"] = {"slot": current_slot, "block_id": bid}
-        # register vote to the block and to all ancestors? For simplicity register to the block only
         chain[bid]["votes_received"].add(vid)
         applied.append((vid, bid))
     return applied
@@ -263,11 +222,6 @@ def apply_due_votes():
 # Finalization check (SSF)
 # ----------------------
 def try_finalize_block(block):
-    """
-    If block has >= quorum votes (counting only applied votes so far),
-    mark block.finalized = True and increment metrics.
-    This implements SSF in the model (finalization in same slot when quorum reached).
-    """
     if block["finalized"]:
         return False
     votes = len(block["votes_received"])
@@ -282,15 +236,6 @@ def try_finalize_block(block):
 # Slot simulation
 # ----------------------
 def simulate_one_slot(simulate_fork_attack=False):
-    """
-    Main function to advance logical time by one slot:
-      - current_slot ++
-      - apply vote events due at this slot (simulates deliveries)
-      - create new block(s) for this slot (normal or fork attack)
-      - schedule votes for newly created block(s)
-      - try to finalize blocks that got enough votes (SSF)
-      - update head
-    """
     global current_slot, current_epoch
     with state_lock:
         current_slot += 1
@@ -298,49 +243,34 @@ def simulate_one_slot(simulate_fork_attack=False):
             current_epoch += 1
         metrics["total_slots_simulated"] += 1
 
-        # 1) apply due votes for this slot (these are votes whose network delay expired)
         applied_votes = apply_due_votes()
 
-        # 2) decide whether to create normal block (one) or fork(s)
         proposer = random.randint(0, NUM_VALIDATORS - 1)
-        # choose parent: usually last head
         parent = lmd_ghost_head()
 
         new_blocks = []
         if simulate_fork_attack and random.random() < FORK_ATTACK_PROB:
-            # create multiple competing blocks (fork attack): create 1..3 alt blocks
             num_forks = random.randint(1, 3)
             for i in range(num_forks):
                 b = add_block(current_slot, parent, proposer)
                 new_blocks.append(b)
             metrics["total_forks"] += num_forks - 1
         else:
-            # normal: single block propose
             b = add_block(current_slot, parent, proposer)
             new_blocks.append(b)
 
-        # 3) schedule votes for each new block (validators will vote with delays)
-        # For simplicity we schedule votes toward each new block (they may end up voting for different targets based on delay)
         for b in new_blocks:
             schedule_votes_for_block(b["id"], origin_slot=current_slot)
 
-        # 4) after scheduling, apply votes that are due immediately (if any had deliver_slot == current_slot)
         newly_applied = apply_due_votes()
 
-        # 5) try to finalize blocks in this slot (SSF)
         for b in new_blocks:
-            if try_finalize_block(b):
-                # mark all ancestors as justified? we only mark block itself finalized for model
-                pass
+            try_finalize_block(b)
 
-        # 6) also try to finalize older blocks if they reached quorum due to delayed votes
         for slot, bids in blocks_in_slot.items():
             for bid in bids:
                 b = chain[bid]
                 try_finalize_block(b)
-
-        # 7) update head_slot (LMD GHOST) - not stored separately
-        # head = lmd_ghost_head()  # computed on demand in /status
 
         return {
             "slot": current_slot,
@@ -353,17 +283,7 @@ def simulate_one_slot(simulate_fork_attack=False):
 # ----------------------
 @app.route("/status", methods=["GET"])
 def status():
-    """
-    Return full model state for frontend rendering:
-      - current_slot, current_epoch
-      - validators list (id, faulty, latest_message)
-      - chain (blocks with minimal fields)
-      - blocks_in_slot mapping
-      - head (from lmd_ghost_head)
-      - pending vote events (for debug)
-    """
     with state_lock:
-        # lightweight chain view
         chain_view = {}
         for bid, b in chain.items():
             chain_view[bid] = {
@@ -371,7 +291,7 @@ def status():
                 "slot": b["slot"],
                 "parent": b["parent"],
                 "finalized": b["finalized"],
-                "votes_count": len(b["votes_received"]),
+                "votes_count": len(b["votes_received"]) if b.get("votes_received") else 0,
                 "proposer": b["proposer"]
             }
         validators_view = []
@@ -399,10 +319,6 @@ def status():
 
 @app.route("/simulate_slot", methods=["POST"])
 def api_simulate_slot():
-    """
-    Trigger one slot step. Accepts optional JSON:
-    { "attack": true|false }
-    """
     payload = request.get_json(force=True, silent=True) or {}
     attack = bool(payload.get("attack", False))
     res = simulate_one_slot(simulate_fork_attack=attack)
@@ -410,25 +326,22 @@ def api_simulate_slot():
 
 @app.route("/toggle_fault", methods=["POST"])
 def api_toggle_fault():
-    """
-    Toggle faulty state of a validator: { "id": int }
-    """
     data = request.get_json(force=True)
     vid = data.get("id")
     if vid is None or not (0 <= vid < NUM_VALIDATORS):
         return jsonify({"error": "invalid validator id"}), 400
     with state_lock:
         validators[vid]["faulty"] = not validators[vid]["faulty"]
-        # when a validator becomes faulty, we do not retroactively remove their votes already applied
         return jsonify({"ok": True, "validator": validators[vid]})
 
 @app.route("/metrics", methods=["GET"])
 def api_metrics():
     with state_lock:
-        # compute on-the-fly additional metrics
         total_blocks = len(chain)
         total_finalized = sum(1 for b in chain.values() if b["finalized"])
-        avg_votes_per_block = (sum(len(b["votes_received"]) for b in chain.values()) / total_blocks) if total_blocks else 0
+        avg_votes_per_block = (
+            sum(len(b["votes_received"]) for b in chain.values()) / total_blocks
+        ) if total_blocks else 0
         return jsonify({
             "current_slot": current_slot,
             "total_blocks": total_blocks,
@@ -441,10 +354,6 @@ def api_metrics():
 
 @app.route("/config", methods=["GET", "POST"])
 def api_config():
-    """
-    GET returns basic config. POST can update certain parameters:
-      { "max_delay_slots": int, "fork_attack_prob": float, "quorum_ratio": float }
-    """
     global MAX_DELAY_SLOTS, FORK_ATTACK_PROB, QUORUM_RATIO
     if request.method == "GET":
         return jsonify({
@@ -467,10 +376,6 @@ def api_config():
 
 @app.route("/simulate_attack", methods=["POST"])
 def api_simulate_attack():
-    """
-    Trigger a stress scenario: run N slots with attack mode enabled.
-    { "slots": int }
-    """
     data = request.get_json(force=True, silent=True) or {}
     count = int(data.get("slots", 5))
     results = []
@@ -478,9 +383,6 @@ def api_simulate_attack():
         results.append(simulate_one_slot(simulate_fork_attack=True))
     return jsonify({"ran": count, "results": results})
 
-# ----------------------
-# Utility: reset (dev only)
-# ----------------------
 @app.route("/reset", methods=["POST"])
 def api_reset():
     global current_slot, current_epoch, chain, blocks_in_slot, vote_events, validators, metrics
@@ -495,9 +397,6 @@ def api_reset():
         metrics = {"total_slots_simulated": 0, "total_forks": 0, "total_finalizations": 0}
     return jsonify({"ok": True})
 
-# ----------------------
-# Static: serve index.html and app.js (if present)
-# ----------------------
 @app.route("/")
 def index():
     return send_from_directory(".", "index.html")
@@ -506,10 +405,7 @@ def index():
 def appjs():
     return send_from_directory(".", "app.js")
 
-# ----------------------
-# Run server
-# ----------------------
 if __name__ == "__main__":
-    print("Starting server_v2.py — SSF/LMD-GHOST prototype")
+    print("Starting server2.py — SSF/LMD-GHOST prototype")
     print("Open http://localhost:5000/")
     app.run(debug=True)
