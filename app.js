@@ -1,12 +1,13 @@
-// Works with server2.py endpoints:
+// app.js — simplified visualizer 
+// Works with server endpoints (server2.py):
 //  GET /status
 //  POST /simulate_slot  ( {attack: bool} )
 //  POST /toggle_fault   ( {id} )
 //  POST /config         ( { max_delay_slots, fork_attack_prob, quorum_ratio } )
 //  POST /simulate_attack ( { slots } )
-//  GET  /metrics
 //  POST /reset
-
+//
+// Author: restored for Architecto0r
 
 const API = "http://localhost:5000";
 
@@ -101,22 +102,28 @@ function buildControls() {
   const simBtn = document.createElement("button");
   simBtn.textContent = "Simulate Slot";
   simBtn.onclick = async () => {
-    await fetch(`${API}/simulate_slot`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({attack: false})});
-    await fetchStatus();
+    try {
+      await fetch(`${API}/simulate_slot`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({attack: false})});
+      await fetchStatus();
+    } catch(e) { console.error(e); }
   };
 
   const attackBtn = document.createElement("button");
   attackBtn.textContent = "Simulate Slot (Attack)";
   attackBtn.onclick = async () => {
-    await fetch(`${API}/simulate_slot`, { method: "POST", headers:{'content-type':'application/json'}, body: JSON.stringify({attack: true})});
-    await fetchStatus();
+    try {
+      await fetch(`${API}/simulate_slot`, { method: "POST", headers:{'content-type':'application/json'}, body: JSON.stringify({attack: true})});
+      await fetchStatus();
+    } catch(e) { console.error(e); }
   };
 
   const resetBtn = document.createElement("button");
   resetBtn.textContent = "Reset";
   resetBtn.onclick = async () => {
-    await fetch(`${API}/reset`, { method: "POST" });
-    await fetchStatus();
+    try {
+      await fetch(`${API}/reset`, { method: "POST" });
+      await fetchStatus();
+    } catch(e){ console.error(e); }
   };
 
   // sliders: max_delay_slots, fork_attack_prob, quorum_ratio
@@ -151,20 +158,26 @@ function buildControls() {
     return box;
   }
 
-  const delaySlider = createSlider("MAX_DELAY_SLOTS", 0, 5, 1, configUI.maxDelay, async (v) => {
+  const delaySlider = createSlider("MAX_DELAY_SLOTS", 0, 8, 1, configUI.maxDelay, async (v) => {
     configUI.maxDelay = Number(v);
-    await fetch(`${API}/config`, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ max_delay_slots: Number(v) })});
-    await fetchStatus();
+    try {
+      await fetch(`${API}/config`, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ max_delay_slots: Number(v) })});
+      await fetchStatus();
+    } catch(e){ console.error(e); }
   });
   const forkSlider = createSlider("FORK_ATTACK_PROB", 0, 0.6, 0.01, configUI.forkProb, async (v) => {
     configUI.forkProb = Number(v);
-    await fetch(`${API}/config`, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ fork_attack_prob: Number(v) })});
-    await fetchStatus();
+    try {
+      await fetch(`${API}/config`, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ fork_attack_prob: Number(v) })});
+      await fetchStatus();
+    } catch(e){ console.error(e); }
   });
   const quorumSlider = createSlider("QUORUM_RATIO", 0.5, 0.9, 0.01, configUI.quorumRatio, async (v) => {
     configUI.quorumRatio = Number(v);
-    await fetch(`${API}/config`, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ quorum_ratio: Number(v) })});
-    await fetchStatus();
+    try {
+      await fetch(`${API}/config`, {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ quorum_ratio: Number(v) })});
+      await fetchStatus();
+    } catch(e){ console.error(e); }
   });
 
   // faulty fraction control
@@ -181,9 +194,11 @@ function buildControls() {
   const applyFaultsBtn = document.createElement("button");
   applyFaultsBtn.textContent = "Apply Faulty Fraction";
   applyFaultsBtn.onclick = async () => {
-    const frac = Number(faultInput.value);
-    await applyFaultFraction(frac);
-    await fetchStatus();
+    try {
+      const frac = Number(faultInput.value);
+      await applyFaultFraction(frac);
+      await fetchStatus();
+    } catch(e) { console.error(e); }
   };
   faultBox.appendChild(faultInput);
   faultBox.appendChild(document.createElement("br"));
@@ -204,7 +219,9 @@ function buildControls() {
   sweepBtn.onclick = async () => {
     sweepBtn.disabled = true;
     sweepNote.textContent = "Running sweep...";
-    await runSweep();
+    try {
+      await runSweep();
+    } catch(e) { console.error(e); }
     sweepBtn.disabled = false;
     sweepNote.textContent = "Sweep finished.";
   };
@@ -242,23 +259,27 @@ async function fetchStatus() {
 
 async function applyFaultFraction(frac) {
   // reset to clean state and toggle first k validators faulty
-  await fetch(`${API}/reset`, { method: "POST" });
-  await fetchStatus();
-  const total = serverState.validators.length;
-  const k = Math.floor(total * frac);
-  for (let i = 0; i < k; i++) {
-    // ensure validator i is faulty (toggle if not)
-    if (!serverState.validators[i].faulty) {
-      await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: i }) });
+  try {
+    await fetch(`${API}/reset`, { method: "POST" });
+    await fetchStatus();
+    const total = serverState.validators.length;
+    const k = Math.floor(total * frac);
+    for (let i = 0; i < k; i++) {
+      // ensure validator i is faulty (toggle if not)
+      if (!serverState.validators[i].faulty) {
+        await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: i }) });
+      }
     }
-  }
-  // if some later ones are faulty (because previous state), turn them off
-  for (let i = k; i < total; i++) {
-    if (serverState.validators[i].faulty) {
-      await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: i }) });
+    // if some later ones are faulty (because previous state), turn them off
+    for (let i = k; i < total; i++) {
+      if (serverState.validators[i].faulty) {
+        await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: i }) });
+      }
     }
+    await fetchStatus();
+  } catch (e) {
+    console.error("applyFaultFraction error", e);
   }
-  await fetchStatus();
 }
 
 ///// Render validators list /////
@@ -277,8 +298,10 @@ function renderValidators() {
     el.textContent = `V#${v.id}${v.slashed ? " (slashed)" : ""}`;
     // clicking toggles
     el.onclick = async () => {
-      await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: v.id }) });
-      await fetchStatus();
+      try {
+        await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: v.id }) });
+        await fetchStatus();
+      } catch(e) { console.error(e); }
     };
     validatorsDiv.appendChild(el);
   });
@@ -338,7 +361,7 @@ function createPacketsFromPending(pending_votes) {
     const endX = targetBlock ? targetBlock.x : canvas.width - 100;
     const endY = targetBlock ? targetBlock.y : 40;
     // travel duration in frames: proportional to (deliver_slot - current_slot) but min 30
-    const slotGap = Math.max(1, (ev.deliver_slot - serverState.current_slot));
+    const slotGap = Math.max(1, (ev.deliver_slot - (serverState.current_slot || 0)));
     const frames = Math.max(40, slotGap * 30);
     packetPool.push({
       key,
@@ -527,10 +550,6 @@ canvas.addEventListener("mousemove", (e) => {
   }
   if (foundKey) {
     const b = serverState.chain[foundKey];
-    if (!b) {
-      // sometimes keys differ (e.g., treeLayout uses blocks_in_slot entries)
-      // try to find in serverState.chain by id
-    }
     // tooltip content
     const votesText = b ? `${b.votes_count} votes` : "";
     tooltip.style.left = (e.pageX + 12) + "px";
@@ -616,32 +635,35 @@ async function runSweep() {
 
   for (const frac of faultFractions) {
     for (const maxd of maxDelays) {
-      // reset server
-      await fetch(`${API}/reset`, { method: "POST" });
-      // set config
-      await fetch(`${API}/config`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ max_delay_slots: maxd, fork_attack_prob: configUI.forkProb, quorum_ratio: configUI.quorumRatio }) });
-      // apply faults: toggle first k validators faulty
-      await fetchStatus();
-      const total = serverState.validators.length;
-      const k = Math.floor(total * frac);
-      for (let i=0;i<k;i++){
-        await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: i }) });
+      try {
+        // reset server
+        await fetch(`${API}/reset`, { method: "POST" });
+        // set config
+        await fetch(`${API}/config`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ max_delay_slots: maxd, fork_attack_prob: configUI.forkProb, quorum_ratio: configUI.quorumRatio }) });
+        // apply faults: toggle first k validators faulty
+        await fetchStatus();
+        const total = serverState.validators.length;
+        const k = Math.floor(total * frac);
+        for (let i=0;i<k;i++){
+          await fetch(`${API}/toggle_fault`, { method: "POST", headers: {'content-type':'application/json'}, body: JSON.stringify({ id: i }) });
+        }
+        // run attack-mode simulation for slotsPerRun (simulate_attack allows N slots)
+        await fetch(`${API}/simulate_attack`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ slots: slotsPerRun }) });
+        // read metrics from server metrics endpoint for sweep summary (server returns totals)
+        await fetchStatus();
+        const mRes = await fetch(`${API}/metrics`);
+        const metricsObj = await mRes.json();
+        // compute derived metrics
+        const fraction_finalized = (metricsObj.total_finalized || 0) / (metricsObj.total_blocks || 1);
+        const avg_time_to_finality = (metricsObj.total_finalizations > 0) ? (metricsObj.total_slots_simulated / metricsObj.total_finalizations) : null;
+        const reorg_rate = (metricsObj.total_slots_simulated || 1) ? (metricsObj.total_forks / metricsObj.total_slots_simulated) : 0;
+        results.push({ fault: frac, delay: maxd, metrics: metricsObj, fraction_finalized, avg_time_to_finality, reorg_rate });
+      } catch (e) {
+        console.error("runSweep step failed", e);
       }
-      // run attack-mode simulation for slotsPerRun (simulate_attack allows N slots)
-      await fetch(`${API}/simulate_attack`, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ slots: slotsPerRun }) });
-      // read metrics
-      await fetchStatus();
-      const mRes = await fetch(`${API}/metrics`);
-      const metricsObj = await mRes.json();
-      // compute derived metrics
-      const fraction_finalized = metricsObj.total_finalized / (metricsObj.total_blocks || 1);
-      const avg_time_to_finality = metricsObj.total_finalizations > 0 ? (metricsObj.total_slots_simulated / metricsObj.total_finalizations) : null;
-      const reorg_rate = metricsObj.total_forks / (metricsObj.total_slots_simulated || 1);
-      results.push({ fault: frac, delay: maxd, metrics: metricsObj, fraction_finalized, avg_time_to_finality, reorg_rate });
     }
   }
 
-  // now draw charts: simple heatmaps or line plots
   drawSweepCharts(results, canvasA, canvasB, canvasC);
 }
 
@@ -694,7 +716,7 @@ function simpleLineChart(canvasEl, { title, xLabels, series }) {
   let ymin = Infinity, ymax = -Infinity;
   for (const s of series) {
     for (const v of s.data) {
-      if (v === null) continue;
+      if (v === null || v === undefined) continue;
       ymin = Math.min(ymin, v);
       ymax = Math.max(ymax, v);
     }
@@ -769,20 +791,11 @@ init();
   const b = document.createElement("button");
   b.textContent = "Run Attack (5 slots)";
   b.onclick = async () => {
-    await fetch(`${API}/simulate_attack`, { method:'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ slots: 5 }) });
-    await fetchStatus();
+    try {
+      await fetch(`${API}/simulate_attack`, { method:'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ slots: 5 }) });
+      await fetchStatus();
+    } catch(e) { console.error(e); }
   };
   controls.appendChild(b);
 })();
-
-
-
-
-
-
-
-
-
-
-
 
